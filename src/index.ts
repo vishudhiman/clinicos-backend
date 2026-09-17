@@ -6,6 +6,7 @@ import { appointmentsRoutes } from "./routes/appointments.js";
 import { conversationsRoutes } from "./routes/conversations.js";
 import { patientsRoutes } from "./routes/patients.js";
 import { clinicRoutes } from "./routes/clinic.js";
+import { chatRoutes } from "./routes/chat.js";
 
 const port = process.env.PORT ? Number(process.env.PORT) : 4002;
 
@@ -17,6 +18,7 @@ new Elysia({ adapter: node() })
   .use(conversationsRoutes)
   .use(patientsRoutes)
   .use(clinicRoutes)
+  .use(chatRoutes)
   .listen(port);
 
 console.log(`ClinicOS backend running at http://localhost:${port}`);
