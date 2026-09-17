@@ -16,11 +16,13 @@ enum AppointmentStatus {
 }
 
 model Clinic {
-  id          String   @id @default(cuid())
-  name        String
-  description String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            String   @id @default(cuid())
+  name          String
+  description   String?
+  address       String?
+  openingHours  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   doctors Doctor[]
 }

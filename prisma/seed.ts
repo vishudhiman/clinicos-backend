@@ -13,6 +13,8 @@ async function main() {
       name: "Demo Clinic",
       description:
         "Demo Clinic is a multi-specialty outpatient clinic offering dermatology and general medicine consultations, open Monday through Saturday.",
+      address: "221B Residency Road, Bengaluru, Karnataka 560025",
+      openingHours: "Mon–Sat 10:00 AM – 7:00 PM, closed Sundays",
     },
   });
 

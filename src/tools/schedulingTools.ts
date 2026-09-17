@@ -1,6 +1,5 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { prisma } from "../db.js";
 import {
   bookAppointment,
   cancelAppointment,
@@ -8,13 +7,7 @@ import {
   rescheduleAppointment,
   getAppointment,
 } from "../services/scheduling.js";
-
-async function resolveDoctorByName(name: string) {
-  const doctor = await prisma.doctor.findFirst({
-    where: { name: { contains: name, mode: "insensitive" } },
-  });
-  return doctor;
-}
+import { findDoctorByName, getSlotMinutesForDoctorOnDay } from "../services/clinicInfo.js";
 
 function formatSlot(date: Date): string {
   return date.toLocaleString("en-IN", {
@@ -28,63 +21,9 @@ function formatSlot(date: Date): string {
   });
 }
 
-export const listDoctorsTool = tool(
-  async () => {
-    const doctors = await prisma.doctor.findMany();
-    return JSON.stringify(
-      doctors.map((d: any) => ({ id: d.id, name: d.name, specialty: d.specialty, bio: d.bio }))
-    );
-  },
-  {
-    name: "list_doctors",
-    description:
-      "List all doctors at the clinic with their id, name, specialty, and bio. Use this to answer questions about which doctors are available or what they specialize in.",
-    schema: z.object({}),
-  }
-);
-
-export const getDoctorInfoTool = tool(
-  async ({ doctorName }) => {
-    const doctor = await resolveDoctorByName(doctorName);
-    if (!doctor) {
-      return JSON.stringify({ error: `No doctor found matching "${doctorName}".` });
-    }
-    return JSON.stringify({
-      name: doctor.name,
-      specialty: doctor.specialty,
-      bio: doctor.bio ?? "No bio on file.",
-    });
-  },
-  {
-    name: "get_doctor_info",
-    description:
-      "Get a specific doctor's specialty and bio. Use this to answer patient questions like 'what does Dr. X specialize in' or 'tell me about Dr. X'. Never invent details not returned here.",
-    schema: z.object({ doctorName: z.string() }),
-  }
-);
-
-export const getClinicInfoTool = tool(
-  async () => {
-    const clinic = await prisma.clinic.findFirst();
-    if (!clinic) {
-      return JSON.stringify({ error: "No clinic information on file." });
-    }
-    return JSON.stringify({
-      name: clinic.name,
-      description: clinic.description ?? "No description on file.",
-    });
-  },
-  {
-    name: "get_clinic_info",
-    description:
-      "Get general information about the clinic itself (name, description). Use this for questions like 'tell me about this clinic'. Never invent details not returned here.",
-    schema: z.object({}),
-  }
-);
-
 export const findAvailableSlotsTool = tool(
   async ({ doctorName, date }) => {
-    const doctor = await resolveDoctorByName(doctorName);
+    const doctor = await findDoctorByName(doctorName);
     if (!doctor) {
       return JSON.stringify({ error: `No doctor found matching "${doctorName}".` });
     }
@@ -108,15 +47,12 @@ export const findAvailableSlotsTool = tool(
 
 export const bookAppointmentTool = tool(
   async ({ doctorName, patientId, startTimeIso }) => {
-    const doctor = await resolveDoctorByName(doctorName);
+    const doctor = await findDoctorByName(doctorName);
     if (!doctor) {
       return JSON.stringify({ error: `No doctor found matching "${doctorName}".` });
     }
     const startTime = new Date(startTimeIso);
-    const schedule = await prisma.doctorSchedule.findFirst({
-      where: { doctorId: doctor.id, dayOfWeek: startTime.getDay() },
-    });
-    const slotMinutes = schedule?.slotMinutes ?? 30;
+    const slotMinutes = await getSlotMinutesForDoctorOnDay(doctor.id, startTime.getDay());
     const endTime = new Date(startTime.getTime() + slotMinutes * 60 * 1000);
 
     try {
@@ -220,9 +156,6 @@ export const getAppointmentStatusTool = tool(
 );
 
 export const schedulingTools = [
-  listDoctorsTool,
-  getDoctorInfoTool,
-  getClinicInfoTool,
   findAvailableSlotsTool,
   bookAppointmentTool,
   cancelAppointmentTool,

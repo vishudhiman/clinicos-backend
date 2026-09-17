@@ -1,7 +1,8 @@
 import { Elysia, t } from "elysia";
 import { prisma } from "../db.js";
 import { chatRequestSchema } from "../schemas/api.js";
-import { runAgentTurn, toLangchainHistory } from "../agents/appointmentAgent.js";
+import { runOrchestratorTurn } from "../agents/orchestrator.js";
+import { toLangchainHistory } from "../agents/history.js";
 import { authGuard } from "../middleware/auth.js";
 
 export const chatRoutes = new Elysia().use(authGuard).post(
@@ -45,7 +46,7 @@ export const chatRoutes = new Elysia().use(authGuard).post(
 
     let agentResult;
     try {
-      agentResult = await runAgentTurn({
+      agentResult = await runOrchestratorTurn({
         patientId,
         message,
         history: toLangchainHistory(priorMessages),

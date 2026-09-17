@@ -15,7 +15,6 @@ export const rescheduleAppointmentSchema = z.object({
 
 export const chatRequestSchema = z.object({
   conversationId: z.string().optional(),
-  patientId: z.string(),
   message: z.string().min(1),
 });
 
@@ -44,4 +43,6 @@ export const updateDoctorSchema = z.object({
 export const updateClinicSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
+  address: z.string().optional(),
+  openingHours: z.string().optional(),
 });
