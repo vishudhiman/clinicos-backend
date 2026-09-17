@@ -1,8 +1,10 @@
 import { Elysia, t } from "elysia";
 import { prisma } from "../db.js";
 import { updateClinicSchema } from "../schemas/api.js";
+import { authGuard } from "../middleware/auth.js";
 
 export const clinicRoutes = new Elysia({ prefix: "/clinic" })
+  .use(authGuard)
   .get("/", async ({ set }) => {
     const clinic = await prisma.clinic.findFirst();
     if (!clinic) {
@@ -13,7 +15,11 @@ export const clinicRoutes = new Elysia({ prefix: "/clinic" })
   })
   .patch(
     "/",
-    async ({ body, set }) => {
+    async ({ body, user, set }) => {
+      if (user!.role !== "ADMIN" && user!.role !== "DOCTOR") {
+        set.status = 403;
+        return { error: "Forbidden" };
+      }
       const parsed = updateClinicSchema.safeParse(body);
       if (!parsed.success) {
         set.status = 400;

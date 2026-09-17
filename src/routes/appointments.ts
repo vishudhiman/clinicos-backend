@@ -7,17 +7,31 @@ import {
   getAppointment,
 } from "../services/scheduling.js";
 import { createAppointmentSchema, rescheduleAppointmentSchema } from "../schemas/api.js";
+import { authGuard } from "../middleware/auth.js";
+import type { AuthTokenPayload } from "../lib/jwt.js";
+
+const isStaff = (user: AuthTokenPayload) => user.role === "ADMIN" || user.role === "DOCTOR";
+
+const canAccess = (
+  user: AuthTokenPayload,
+  appointment: { patientId: string; doctorId: string }
+) => isStaff(user) || user.patientId === appointment.patientId || user.doctorId === appointment.doctorId;
 
 export const appointmentsRoutes = new Elysia({ prefix: "/appointments" })
-  .get("/", async () => {
+  .use(authGuard)
+  .get("/", async ({ user, set }) => {
+    if (!isStaff(user!)) {
+      set.status = 403;
+      return { error: "Forbidden" };
+    }
     return prisma.appointment.findMany({
       include: { doctor: true, patient: true },
       orderBy: { startTime: "asc" },
     });
   })
-  .get("/:id", async ({ params, set }) => {
+  .get("/:id", async ({ params, user, set }) => {
     const appointment = await getAppointment(params.id);
-    if (!appointment) {
+    if (!appointment || !canAccess(user!, appointment)) {
       set.status = 404;
       return { error: "Appointment not found" };
     }
@@ -25,14 +39,19 @@ export const appointmentsRoutes = new Elysia({ prefix: "/appointments" })
   })
   .post(
     "/",
-    async ({ body, set }) => {
+    async ({ body, user, set }) => {
       const parsed = createAppointmentSchema.safeParse(body);
       if (!parsed.success) {
         set.status = 400;
         return { error: parsed.error.flatten() };
       }
+      const patientId = isStaff(user!) ? parsed.data.patientId : user!.patientId;
+      if (!patientId) {
+        set.status = 403;
+        return { error: "Forbidden" };
+      }
       try {
-        return await bookAppointment(parsed.data);
+        return await bookAppointment({ ...parsed.data, patientId });
       } catch (err) {
         set.status = 409;
         return { error: (err as Error).message };
@@ -40,7 +59,12 @@ export const appointmentsRoutes = new Elysia({ prefix: "/appointments" })
     },
     { body: t.Any() }
   )
-  .post("/:id/cancel", async ({ params, set }) => {
+  .post("/:id/cancel", async ({ params, user, set }) => {
+    const appointment = await getAppointment(params.id);
+    if (!appointment || !canAccess(user!, appointment)) {
+      set.status = 404;
+      return { error: "Appointment not found" };
+    }
     try {
       return await cancelAppointment(params.id);
     } catch (err) {
@@ -50,7 +74,12 @@ export const appointmentsRoutes = new Elysia({ prefix: "/appointments" })
   })
   .post(
     "/:id/reschedule",
-    async ({ params, body, set }) => {
+    async ({ params, body, user, set }) => {
+      const appointment = await getAppointment(params.id);
+      if (!appointment || !canAccess(user!, appointment)) {
+        set.status = 404;
+        return { error: "Appointment not found" };
+      }
       const parsed = rescheduleAppointmentSchema.safeParse(body);
       if (!parsed.success) {
         set.status = 400;

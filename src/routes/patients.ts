@@ -1,9 +1,14 @@
 import { Elysia, t } from "elysia";
 import { prisma } from "../db.js";
+import { authGuard } from "../middleware/auth.js";
 
-export const patientsRoutes = new Elysia({ prefix: "/patients" }).post(
+export const patientsRoutes = new Elysia({ prefix: "/patients" }).use(authGuard).post(
   "/",
-  async ({ body, set }) => {
+  async ({ body, user, set }) => {
+    if (user!.role !== "ADMIN" && user!.role !== "DOCTOR") {
+      set.status = 403;
+      return { error: "Forbidden" };
+    }
     const { name, phoneNumber } = body as { name: string; phoneNumber: string };
     if (!name?.trim() || !phoneNumber?.trim()) {
       set.status = 400;

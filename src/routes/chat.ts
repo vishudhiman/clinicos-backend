@@ -2,16 +2,22 @@ import { Elysia, t } from "elysia";
 import { prisma } from "../db.js";
 import { chatRequestSchema } from "../schemas/api.js";
 import { runAgentTurn, toLangchainHistory } from "../agents/appointmentAgent.js";
+import { authGuard } from "../middleware/auth.js";
 
-export const chatRoutes = new Elysia().post(
+export const chatRoutes = new Elysia().use(authGuard).post(
   "/chat",
-  async ({ body, set }) => {
+  async ({ body, user, set }) => {
     const parsed = chatRequestSchema.safeParse(body);
     if (!parsed.success) {
       set.status = 400;
       return { error: parsed.error.flatten() };
     }
-    const { patientId, message } = parsed.data;
+    if (user!.role !== "PATIENT" || !user!.patientId) {
+      set.status = 403;
+      return { error: "Forbidden" };
+    }
+    const patientId = user!.patientId;
+    const { message } = parsed.data;
 
     const patient = await prisma.patient.findUnique({ where: { id: patientId } });
     if (!patient) {
@@ -23,7 +29,7 @@ export const chatRoutes = new Elysia().post(
       ? await prisma.conversation.findUnique({ where: { id: parsed.data.conversationId } })
       : await prisma.conversation.create({ data: { patientId } });
 
-    if (!conversation) {
+    if (!conversation || conversation.patientId !== patientId) {
       set.status = 404;
       return { error: "Conversation not found" };
     }

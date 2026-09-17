@@ -7,12 +7,14 @@ import {
   oauthUpsertSchema,
   updateProfileSchema,
 } from "../schemas/auth.js";
+import { signAuthToken, type Role } from "../lib/jwt.js";
+import { authGuard, internalOnly } from "../middleware/auth.js";
 
 function toSafeUser(user: {
   id: string;
   name: string | null;
   email: string | null;
-  role: string;
+  role: Role;
   doctorId: string | null;
   patientId: string | null;
 }) {
@@ -24,6 +26,11 @@ function toSafeUser(user: {
     doctorId: user.doctorId,
     patientId: user.patientId,
   };
+}
+
+function withToken(user: Parameters<typeof toSafeUser>[0]) {
+  const safeUser = toSafeUser(user);
+  return { user: safeUser, token: signAuthToken(safeUser) };
 }
 
 export const authRoutes = new Elysia({ prefix: "/auth" })
@@ -96,77 +103,91 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         return { error: "Invalid email or password." };
       }
 
-      return toSafeUser(user);
+      return withToken(user);
     },
     { body: t.Any() }
   )
-  .post(
-    "/oauth",
-    async ({ body, set }) => {
-      const parsed = oauthUpsertSchema.safeParse(body);
-      if (!parsed.success) {
-        set.status = 400;
-        return { error: parsed.error.flatten() };
-      }
-      const { email, name } = parsed.data;
+  .guard({}, (app) =>
+    app.use(internalOnly).post(
+      "/oauth",
+      async ({ body, set }) => {
+        const parsed = oauthUpsertSchema.safeParse(body);
+        if (!parsed.success) {
+          set.status = 400;
+          return { error: parsed.error.flatten() };
+        }
+        const { email, name } = parsed.data;
 
-      const existing = await prisma.user.findUnique({ where: { email } });
-      if (existing) {
-        return toSafeUser(existing);
-      }
+        const existing = await prisma.user.findUnique({ where: { email } });
+        if (existing) {
+          return withToken(existing);
+        }
 
-      // Self-service OAuth sign-up is always a patient account, same as the credentials path.
-      const user = await prisma.$transaction(async (tx) => {
-        const patient = await tx.patient.create({ data: { name: name ?? "Patient", email } });
-        return tx.user.create({
-          data: { name: name ?? "Patient", email, role: "PATIENT", patientId: patient.id },
+        // Self-service OAuth sign-up is always a patient account, same as the credentials path.
+        const user = await prisma.$transaction(async (tx) => {
+          const patient = await tx.patient.create({ data: { name: name ?? "Patient", email } });
+          return tx.user.create({
+            data: { name: name ?? "Patient", email, role: "PATIENT", patientId: patient.id },
+          });
         });
-      });
 
-      return toSafeUser(user);
-    },
-    { body: t.Any() }
+        return withToken(user);
+      },
+      { body: t.Any() }
+    )
   )
-  .get("/profile", async ({ query, set }) => {
-    if (!query.patientId) {
-      set.status = 400;
-      return { error: "patientId is required" };
-    }
-    const patient = await prisma.patient.findUnique({ where: { id: query.patientId } });
-    if (!patient) {
-      set.status = 404;
-      return { error: "Profile not found" };
-    }
-    return {
-      name: patient.name,
-      email: patient.email,
-      phoneNumber: patient.phoneNumber,
-      memberSince: patient.createdAt,
-    };
-  }, { query: t.Object({ patientId: t.Optional(t.String()) }) })
-  .patch(
-    "/profile",
-    async ({ body, set }) => {
-      const parsed = updateProfileSchema.safeParse(body);
-      if (!parsed.success) {
-        set.status = 400;
-        return { error: parsed.error.flatten() };
-      }
-      try {
-        const patient = await prisma.patient.update({
-          where: { id: parsed.data.patientId },
-          data: { name: parsed.data.name, phoneNumber: parsed.data.phoneNumber || null },
-        });
-        return {
-          name: patient.name,
-          email: patient.email,
-          phoneNumber: patient.phoneNumber,
-          memberSince: patient.createdAt,
-        };
-      } catch {
-        set.status = 409;
-        return { error: "That phone number is already in use by another account." };
-      }
-    },
-    { body: t.Any() }
+  .guard({}, (app) =>
+    app
+      .use(authGuard)
+      .get(
+        "/profile",
+        async ({ query, user, set }) => {
+          if (!query.patientId || query.patientId !== user!.patientId) {
+            set.status = 403;
+            return { error: "Forbidden" };
+          }
+          const patient = await prisma.patient.findUnique({ where: { id: query.patientId } });
+          if (!patient) {
+            set.status = 404;
+            return { error: "Profile not found" };
+          }
+          return {
+            name: patient.name,
+            email: patient.email,
+            phoneNumber: patient.phoneNumber,
+            memberSince: patient.createdAt,
+          };
+        },
+        { query: t.Object({ patientId: t.Optional(t.String()) }) }
+      )
+      .patch(
+        "/profile",
+        async ({ body, user, set }) => {
+          const parsed = updateProfileSchema.safeParse(body);
+          if (!parsed.success) {
+            set.status = 400;
+            return { error: parsed.error.flatten() };
+          }
+          if (parsed.data.patientId !== user!.patientId) {
+            set.status = 403;
+            return { error: "Forbidden" };
+          }
+          try {
+            const patient = await prisma.patient.update({
+              where: { id: parsed.data.patientId },
+              data: { name: parsed.data.name, phoneNumber: parsed.data.phoneNumber || null },
+            });
+            return {
+              name: patient.name,
+              email: patient.email,
+              phoneNumber: patient.phoneNumber,
+              memberSince: patient.createdAt,
+            };
+          } catch {
+            set.status = 409;
+            return { error: "That phone number is already in use by another account." };
+          }
+        },
+        { body: t.Any() }
+      )
   );

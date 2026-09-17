@@ -2,8 +2,13 @@ import { Elysia, t } from "elysia";
 import { prisma } from "../db.js";
 import { findAvailableSlots } from "../services/scheduling.js";
 import { createDoctorSchema, updateDoctorSchema } from "../schemas/api.js";
+import { authGuard } from "../middleware/auth.js";
+import type { AuthTokenPayload } from "../lib/jwt.js";
+
+const isStaff = (user: AuthTokenPayload) => user.role === "ADMIN" || user.role === "DOCTOR";
 
 export const doctorsRoutes = new Elysia({ prefix: "/doctors" })
+  .use(authGuard)
   .get("/", async () => {
     return prisma.doctor.findMany({ include: { schedules: true } });
   })
@@ -33,7 +38,11 @@ export const doctorsRoutes = new Elysia({ prefix: "/doctors" })
   )
   .post(
     "/",
-    async ({ body, set }) => {
+    async ({ body, user, set }) => {
+      if (!isStaff(user!)) {
+        set.status = 403;
+        return { error: "Forbidden" };
+      }
       const parsed = createDoctorSchema.safeParse(body);
       if (!parsed.success) {
         set.status = 400;
@@ -67,7 +76,11 @@ export const doctorsRoutes = new Elysia({ prefix: "/doctors" })
   )
   .patch(
     "/:id",
-    async ({ params, body, set }) => {
+    async ({ params, body, user, set }) => {
+      if (!isStaff(user!)) {
+        set.status = 403;
+        return { error: "Forbidden" };
+      }
       const parsed = updateDoctorSchema.safeParse(body);
       if (!parsed.success) {
         set.status = 400;
