@@ -1,5 +1,28 @@
 import { prisma } from "../db.js";
 import type { Appointment, AppointmentStatus } from "@prisma/client";
+import {
+  sendBookingConfirmation,
+  sendCancellationNotice,
+  sendRescheduleNotice,
+  scheduleReminders,
+  cancelPendingReminders,
+} from "./notifications/notificationService.js";
+import type { AppointmentWithRelations } from "./notifications/types.js";
+
+// Fire-and-forget on purpose: nothing in here — including the relation lookup itself —
+// may ever affect the booking/cancel/reschedule result. Both the REST API and the AI
+// agent's tools call the functions below, so this is the single place notifications
+// hook into the appointment lifecycle.
+function notifyInBackground(task: () => Promise<unknown>, label: string) {
+  task().catch((err) => console.error(`[notifications] ${label} failed:`, err));
+}
+
+async function withRelations(appointmentId: string): Promise<AppointmentWithRelations> {
+  return prisma.appointment.findUniqueOrThrow({
+    where: { id: appointmentId },
+    include: { doctor: true, patient: true },
+  });
+}
 
 const ACTIVE_STATUSES: AppointmentStatus[] = ["PENDING", "CONFIRMED"];
 
@@ -120,14 +143,27 @@ export async function bookAppointment(params: {
         status: "CONFIRMED",
       },
     });
+  }).then((appointment) => {
+    notifyInBackground(async () => {
+      const full = await withRelations(appointment.id);
+      await sendBookingConfirmation(full);
+      await scheduleReminders(full);
+    }, "booking confirmation/reminders");
+    return appointment;
   });
 }
 
 export async function cancelAppointment(appointmentId: string): Promise<Appointment> {
-  return prisma.appointment.update({
+  const appointment = await prisma.appointment.update({
     where: { id: appointmentId },
     data: { status: "CANCELLED" },
   });
+  notifyInBackground(async () => {
+    const full = await withRelations(appointment.id);
+    await cancelPendingReminders(appointment.id);
+    await sendCancellationNotice(full);
+  }, "cancellation notice");
+  return appointment;
 }
 
 export async function rescheduleAppointment(params: {
@@ -158,6 +194,14 @@ export async function rescheduleAppointment(params: {
       where: { id: existing.id },
       data: { startTime: params.newStartTime, endTime: params.newEndTime },
     });
+  }).then((appointment) => {
+    notifyInBackground(async () => {
+      const full = await withRelations(appointment.id);
+      await cancelPendingReminders(appointment.id);
+      await scheduleReminders(full);
+      await sendRescheduleNotice(full);
+    }, "reschedule notifications");
+    return appointment;
   });
 }
 
