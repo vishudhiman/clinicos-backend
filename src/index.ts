@@ -9,6 +9,7 @@ import { clinicRoutes } from "./routes/clinic.js";
 import { notificationsRoutes } from "./routes/notifications.js";
 import { authRoutes } from "./routes/auth.js";
 import { chatRoutes } from "./routes/chat.js";
+import { calendarRoutes, calendarOAuthCallbackRoute } from "./routes/calendar.js";
 import { startReminderScheduler } from "./services/notifications/scheduler.js";
 
 const port = process.env.PORT ? Number(process.env.PORT) : 4002;
@@ -24,6 +25,8 @@ new Elysia({ adapter: node() })
   .use(notificationsRoutes)
   .use(authRoutes)
   .use(chatRoutes)
+  .use(calendarRoutes)
+  .use(calendarOAuthCallbackRoute)
   .listen(port);
 
 startReminderScheduler();

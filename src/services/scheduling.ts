@@ -8,6 +8,7 @@ import {
   cancelPendingReminders,
 } from "./notifications/notificationService.js";
 import type { AppointmentWithRelations } from "./notifications/types.js";
+import { syncOnBook, syncOnCancel, syncOnReschedule } from "./calendarSync/calendarSyncService.js";
 
 // Fire-and-forget on purpose: nothing in here — including the relation lookup itself —
 // may ever affect the booking/cancel/reschedule result. Both the REST API and the AI
@@ -120,6 +121,14 @@ export async function bookAppointment(params: {
   notes?: string;
 }): Promise<Appointment> {
   return prisma.$transaction(async (tx) => {
+    // Serializes booking attempts per doctor: under the default READ COMMITTED
+    // isolation, two concurrent transactions could both pass the conflict check
+    // below before either commits, double-booking the slot. The advisory lock
+    // makes the second transaction wait here until the first commits (and
+    // releases the lock automatically at transaction end), so its conflict
+    // check sees the first transaction's write.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${params.doctorId}))`;
+
     const conflict = await tx.appointment.findFirst({
       where: {
         doctorId: params.doctorId,
@@ -149,6 +158,10 @@ export async function bookAppointment(params: {
       await sendBookingConfirmation(full);
       await scheduleReminders(full);
     }, "booking confirmation/reminders");
+    notifyInBackground(async () => {
+      const full = await withRelations(appointment.id);
+      await syncOnBook(full);
+    }, "calendar sync");
     return appointment;
   });
 }
@@ -163,6 +176,10 @@ export async function cancelAppointment(appointmentId: string): Promise<Appointm
     await cancelPendingReminders(appointment.id);
     await sendCancellationNotice(full);
   }, "cancellation notice");
+  notifyInBackground(async () => {
+    const full = await withRelations(appointment.id);
+    await syncOnCancel(full);
+  }, "calendar sync");
   return appointment;
 }
 
@@ -175,6 +192,9 @@ export async function rescheduleAppointment(params: {
     const existing = await tx.appointment.findUniqueOrThrow({
       where: { id: params.appointmentId },
     });
+
+    // See bookAppointment for why this lock is needed.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${existing.doctorId}))`;
 
     const conflict = await tx.appointment.findFirst({
       where: {
@@ -201,6 +221,10 @@ export async function rescheduleAppointment(params: {
       await scheduleReminders(full);
       await sendRescheduleNotice(full);
     }, "reschedule notifications");
+    notifyInBackground(async () => {
+      const full = await withRelations(appointment.id);
+      await syncOnReschedule(full);
+    }, "calendar sync");
     return appointment;
   });
 }

@@ -36,12 +36,27 @@ model Doctor {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  clinic       Clinic            @relation(fields: [clinicId], references: [id])
-  schedules    DoctorSchedule[]
-  appointments Appointment[]
-  user         User?
+  clinic          Clinic                  @relation(fields: [clinicId], references: [id])
+  schedules       DoctorSchedule[]
+  appointments    Appointment[]
+  user            User?
+  calendarAccount DoctorCalendarAccount?
 
   @@index([clinicId])
+}
+
+// One row per doctor who has connected their Google Calendar. Absence of a row means
+// "not connected" — calendarSyncService treats that as a no-op, so booking/cancelling/
+// rescheduling works identically whether or not a doctor has ever connected a calendar.
+model DoctorCalendarAccount {
+  id               String   @id @default(cuid())
+  doctorId         String   @unique
+  googleCalendarId String   @default("primary")
+  // AES-256-GCM encrypted (see src/lib/tokenCrypto.ts) — never stored in plaintext.
+  refreshToken     String
+  connectedAt      DateTime @default(now())
+
+  doctor Doctor @relation(fields: [doctorId], references: [id])
 }
 
 // dayOfWeek: 0 = Sunday .. 6 = Saturday
@@ -81,6 +96,9 @@ model Appointment {
   endTime   DateTime
   status    AppointmentStatus @default(PENDING)
   notes     String?
+  // Google Calendar event id once synced (see calendarSyncService) — null if the doctor
+  // has no calendar connected, or sync hasn't completed yet.
+  googleEventId String?
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt
 
