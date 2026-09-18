@@ -19,7 +19,9 @@ const port = process.env.PORT ? Number(process.env.PORT) : 4002;
 // FRONTEND_URL already used for the Calendar OAuth redirect) — kept as an explicit
 // allowlist rather than "*" because credentialed requests need a concrete origin.
 const allowedOrigins = [
+  "http://localhost:3000",
   "http://localhost:4001",
+  "https://clinicos-live.vercel.app",
   process.env.FRONTEND_URL,
 ].filter((origin): origin is string => Boolean(origin));
 
