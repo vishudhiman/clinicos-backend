@@ -20,14 +20,21 @@ const canAccess = (
 export const appointmentsRoutes = new Elysia({ prefix: "/appointments" })
   .use(authGuard)
   .get("/", async ({ user, set }) => {
-    if (!isStaff(user!)) {
-      set.status = 403;
-      return { error: "Forbidden" };
+    if (isStaff(user!)) {
+      return prisma.appointment.findMany({
+        include: { doctor: true, patient: true },
+        orderBy: { startTime: "asc" },
+      });
     }
-    return prisma.appointment.findMany({
-      include: { doctor: true, patient: true },
-      orderBy: { startTime: "asc" },
-    });
+    if (user!.patientId) {
+      return prisma.appointment.findMany({
+        where: { patientId: user!.patientId },
+        include: { doctor: true, patient: true },
+        orderBy: { startTime: "asc" },
+      });
+    }
+    set.status = 403;
+    return { error: "Forbidden" };
   })
   .get("/:id", async ({ params, user, set }) => {
     const appointment = await getAppointment(params.id);

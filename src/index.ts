@@ -10,6 +10,7 @@ import { notificationsRoutes } from "./routes/notifications.js";
 import { authRoutes } from "./routes/auth.js";
 import { chatRoutes } from "./routes/chat.js";
 import { calendarRoutes, calendarOAuthCallbackRoute } from "./routes/calendar.js";
+import { whatsappRoutes } from "./routes/whatsapp.js";
 import { startReminderScheduler } from "./services/notifications/scheduler.js";
 
 const port = process.env.PORT ? Number(process.env.PORT) : 4002;
@@ -27,6 +28,7 @@ new Elysia({ adapter: node() })
   .use(chatRoutes)
   .use(calendarRoutes)
   .use(calendarOAuthCallbackRoute)
+  .use(whatsappRoutes)
   .listen(port);
 
 startReminderScheduler();

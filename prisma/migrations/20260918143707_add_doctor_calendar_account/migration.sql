@@ -1,6 +1,16 @@
--- Drop leftover dev-only messages from the shelved staff-handoff prototype: the STAFF
--- role is being removed below and no longer exists in the schema.
-DELETE FROM "Message" WHERE "role" = 'STAFF';
+-- Clean up drift from an earlier local prototype (the shelved staff-handoff feature)
+-- that added a STAFF message role outside of any committed migration. Guarded so this
+-- is safe both on that drifted dev database and on a fresh one (e.g. `prisma migrate
+-- reset`), where 'STAFF' never existed in the enum to begin with.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_enum e JOIN pg_type t ON e.enumtypid = t.oid
+    WHERE t.typname = 'MessageRole' AND e.enumlabel = 'STAFF'
+  ) THEN
+    EXECUTE 'DELETE FROM "Message" WHERE "role" = ''STAFF''';
+  END IF;
+END $$;
 
 -- AlterEnum
 BEGIN;
@@ -14,11 +24,13 @@ COMMIT;
 -- AlterTable
 ALTER TABLE "Appointment" ADD COLUMN     "googleEventId" TEXT;
 
--- AlterTable
-ALTER TABLE "Conversation" DROP COLUMN "status";
+-- AlterTable (IF EXISTS: same drift-cleanup reasoning as the STAFF enum value above —
+-- this column/type only ever existed on the locally drifted dev database, never via a
+-- committed migration)
+ALTER TABLE "Conversation" DROP COLUMN IF EXISTS "status";
 
 -- DropEnum
-DROP TYPE "ConversationStatus";
+DROP TYPE IF EXISTS "ConversationStatus";
 
 -- CreateTable
 CREATE TABLE "DoctorCalendarAccount" (
